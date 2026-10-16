@@ -1,0 +1,33 @@
+﻿services:
+  ai-hub-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-hub-api
+    ports:
+      - "8000:8000"
+    environment:
+      APP_NAME: "AI Hub"
+      APP_VERSION: "1.0.0"
+      API_V1_PREFIX: "/api/v1"
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      DEBUG: "false"
+      AI_HUB_SECRET_KEY: "${AI_HUB_SECRET_KEY:?Set AI_HUB_SECRET_KEY in your environment or .env file}"
+      AI_HUB_DATABASE_PATH: "/app/artifacts/ai_hub.sqlite3"
+      AI_HUB_UPLOAD_DIR: "/app/uploads"
+      UPLOAD_DIR: "/app/uploads"
+      DATA_DIR: "/app/data"
+      LOG_DIR: "/app/logs"
+    volumes:
+      - ai_hub_artifacts:/app/artifacts
+      - ai_hub_uploads:/app/uploads
+      - ai_hub_data:/app/data
+      - ai_hub_logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  ai_hub_artifacts:
+  ai_hub_uploads:
+  ai_hub_data:
+  ai_hub_logs:

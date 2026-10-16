@@ -1,0 +1,8 @@
+﻿APP_NAME = "AI Hub"
+API_V1_PREFIX = "/api/v1"
+SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
+DEFAULT_CHUNK_SIZE = 500
+DEFAULT_CHUNK_OVERLAP = 80
+DEFAULT_TOP_K = 5
+MAX_UPLOAD_MB = 10

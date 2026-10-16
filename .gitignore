@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated data and model artifacts
+data/
+artifacts/
+vector_store/
+chroma_db/
+uploads/
+*.pt
+*.pth
+*.onnx
+*.keras
+*.h5
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+temp/
+
+# IDE and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+# Local backups and temporary copies
+backups/
+*.backup
+*.cors-backup
+
+# Local test media (keep out of Git unless intentionally needed)
+traffic.mp4
+
+# All local backup copies
+*backup*
+
+# Local backup extensions
+*.bak
+*.backup
+*.cors-backup
+*.step*-backup
+*.batch*-backup
