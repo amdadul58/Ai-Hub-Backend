@@ -1,22 +1,25 @@
-﻿from fastapi import APIRouter, Depends, Header, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.core.security import verify_access_token
 from src.services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["Users"])
 service = UserService()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def current_user_id(authorization: str | None = Header(default=None)):
-    if not authorization or not authorization.lower().startswith("bearer "):
+def current_user_id(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+):
+    if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=401,
             detail="Bearer token required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = authorization.split(" ", 1)[1].strip()
-    payload = verify_access_token(token)
+    payload = verify_access_token(credentials.credentials)
 
     if not payload or not payload.get("sub"):
         raise HTTPException(
@@ -43,7 +46,10 @@ def get_me(user_id: str = Depends(current_user_id)):
     user = service.get_user(user_id)
 
     if not user:
-        raise HTTPException(status_code=401, detail="User account no longer exists.")
+        raise HTTPException(
+            status_code=401,
+            detail="User account no longer exists.",
+        )
 
     user.pop("password_hash", None)
     return user

@@ -9,6 +9,7 @@ from src.api.v1.mlops import router as mlops_router
 from src.api.v1.model_registry import router as model_registry_router
 from src.api.v1.monitoring import router as monitoring_router
 from src.api.v1.machine_learning import router as machine_learning_router
+from src.api.v1.csv_machine_learning import router as csv_machine_learning_router
 
 from src.api.v1.traffic import router as traffic_router
 from src.api.v1.vision import router as vision_router
@@ -52,6 +53,7 @@ for module_router in (
     prompts_router,
     llm_router,
     machine_learning_router,
+    csv_machine_learning_router,
     fine_tuning_router,
 ):
     api_router.include_router(module_router)

@@ -1,7 +1,8 @@
-from pathlib import Path
+﻿from pathlib import Path
+from uuid import uuid4
 import sys
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 router = APIRouter(prefix="/speech", tags=["Speech AI"])
 
@@ -9,70 +10,69 @@ BASE_DIR = Path(__file__).resolve().parents[3]
 UPLOAD_DIR = BASE_DIR / "uploads" / "speech"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-SPEECH_LAB_SITE_PACKAGES = Path(
-    r"D:\Ai Eng 26.2\Speech AI Lab\venv\Lib\site-packages"
-)
+SPEECH_LAB_DIR = BASE_DIR.parent.parent / "Speech AI Lab"
+SPEECH_LAB_SITE_PACKAGES = SPEECH_LAB_DIR / "venv" / "Lib" / "site-packages"
+MODEL_CANDIDATES = [
+    BASE_DIR / "ai_models" / "tiny.pt",
+    BASE_DIR / "ai_models" / "speech" / "tiny.pt",
+    SPEECH_LAB_DIR / "models" / "tiny.pt",
+]
 
-if SPEECH_LAB_SITE_PACKAGES.is_dir():
-    site_packages = str(SPEECH_LAB_SITE_PACKAGES)
-    if site_packages not in sys.path:
-        sys.path.insert(0, site_packages)
-
-ALLOWED_AUDIO_FORMATS = {
-    ".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"
-}
+ALLOWED_AUDIO_FORMATS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
 MAX_FILE_SIZE = 25 * 1024 * 1024
-
 _whisper_model = None
+
+
+def find_model_path():
+    return next((path for path in MODEL_CANDIDATES if path.is_file()), None)
 
 
 def get_whisper_model():
     global _whisper_model
 
-    if _whisper_model is None:
+    if _whisper_model is not None:
+        return _whisper_model
+
+    if find_model_path() is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Local Whisper Tiny model is not available.",
+        )
+
+    try:
+        import whisper
+    except ImportError:
+        if SPEECH_LAB_SITE_PACKAGES.is_dir():
+            path_string = str(SPEECH_LAB_SITE_PACKAGES)
+            if path_string not in sys.path:
+                sys.path.insert(0, path_string)
         try:
             import whisper
         except ImportError as exc:
             raise HTTPException(
-                status_code=500,
-                detail="Whisper is unavailable in the Speech AI Lab environment.",
+                status_code=503,
+                detail="Whisper is not installed in an available Python environment.",
             ) from exc
 
-        model_path = (
-            Path(r"D:\Ai Eng 26.2\Speech AI Lab")
-            / "models"
-            / "tiny.pt"
-        )
-
-        try:
-            if not model_path.is_file():
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Whisper model not found: {model_path}",
-                )
-
-            _whisper_model = whisper.load_model(
-                str(model_path),
-                device="cpu",
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Could not load Whisper model: {exc}",
-            ) from exc
-
-    return _whisper_model
+    try:
+        _whisper_model = whisper.load_model(str(find_model_path()), device="cpu")
+        return _whisper_model
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not load the local Whisper model.",
+        ) from exc
 
 
 @router.get("/status")
 def speech_status():
+    model_path = find_model_path()
     return {
         "module": "Speech AI",
-        "status": "ready_for_audio_upload_and_transcription",
+        "status": "ready" if model_path else "model_not_found",
         "whisper_environment_found": SPEECH_LAB_SITE_PACKAGES.is_dir(),
-        "model": "Whisper Tiny",
+        "model_exists": model_path is not None,
+        "model_path": str(model_path) if model_path else None,
         "device": "cpu",
         "default_language": "bn",
         "supported_formats": sorted(ALLOWED_AUDIO_FORMATS),
@@ -81,39 +81,34 @@ def speech_status():
     }
 
 
-@router.post("/upload")
-async def upload_audio(file: UploadFile = File(...)):
+async def read_audio_upload(file: UploadFile):
     extension = Path(file.filename or "").suffix.lower()
-
     if extension not in ALLOWED_AUDIO_FORMATS:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported audio format.",
+            detail="Use WAV, MP3, M4A, OGG, FLAC, or WEBM.",
         )
 
+    content = await file.read(MAX_FILE_SIZE + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded audio file is empty.")
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Maximum audio file size is 25 MB.")
+
+    filename = f"{uuid4().hex}{extension}"
+    output_path = UPLOAD_DIR / filename
+    output_path.write_bytes(content)
+    return filename, output_path, len(content)
+
+
+@router.post("/upload")
+async def upload_audio(file: UploadFile = File(...)):
     try:
-        content = await file.read(MAX_FILE_SIZE + 1)
-
-        if not content:
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded audio file is empty.",
-            )
-
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail="Maximum audio file size is 25 MB.",
-            )
-
-        filename = Path(file.filename or "audio").name
-        output_path = UPLOAD_DIR / filename
-        output_path.write_bytes(content)
-
+        filename, output_path, size_bytes = await read_audio_upload(file)
         return {
             "module": "Speech AI",
             "filename": filename,
-            "size_bytes": len(content),
+            "size_bytes": size_bytes,
             "saved_as": str(output_path),
             "status": "audio_uploaded",
             "transcription_endpoint": "/api/v1/speech/transcribe",
@@ -127,36 +122,13 @@ async def transcribe_audio(
     file: UploadFile = File(...),
     language: str = Query(
         default="bn",
+        min_length=2,
+        max_length=10,
         description="Language code, e.g. bn for Bengali or en for English.",
     ),
 ):
-    extension = Path(file.filename or "").suffix.lower()
-
-    if extension not in ALLOWED_AUDIO_FORMATS:
-        raise HTTPException(
-            status_code=400,
-            detail="Use WAV, MP3, M4A, OGG, FLAC, or WEBM.",
-        )
-
     try:
-        content = await file.read(MAX_FILE_SIZE + 1)
-
-        if not content:
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded audio file is empty.",
-            )
-
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail="Maximum audio file size is 25 MB.",
-            )
-
-        filename = Path(file.filename or "audio").name
-        audio_path = UPLOAD_DIR / filename
-        audio_path.write_bytes(content)
-
+        filename, audio_path, _ = await read_audio_upload(file)
         model = get_whisper_model()
 
         try:
@@ -171,11 +143,10 @@ async def transcribe_audio(
         except Exception as exc:
             raise HTTPException(
                 status_code=422,
-                detail=f"Audio transcription failed: {exc}",
+                detail="Audio transcription failed. Check the audio format and codec.",
             ) from exc
 
         text = result.get("text", "").strip()
-
         return {
             "module": "Speech AI",
             "filename": filename,
@@ -186,3 +157,4 @@ async def transcribe_audio(
         }
     finally:
         await file.close()
+

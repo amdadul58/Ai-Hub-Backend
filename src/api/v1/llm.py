@@ -1,9 +1,13 @@
-﻿from fastapi import APIRouter, HTTPException
+﻿import logging
+
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from src.llm.generation import TextGenerator
 from src.llm.model_loader import load_local_model
 from src.llm.local_inference import LocalInference
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/llm", tags=["LLM"])
 
@@ -26,7 +30,11 @@ def llm_status():
     return {
         "status": "ready" if _generator is not None else "model_not_loaded",
         "model_loaded": _generator is not None,
-        "detail": "Local inference status",
+        "detail": (
+            "Local inference is ready."
+            if _generator is not None
+            else _model_error
+        ),
     }
 
 
@@ -37,23 +45,25 @@ def load_model(request: ModelLoadRequest):
     try:
         tokenizer, model = load_local_model(request.model_path)
         inference = LocalInference(
-            tokenizer,
             model,
+            tokenizer,
             max_new_tokens=request.max_new_tokens,
         )
         _generator = TextGenerator(inference=inference)
         _model_error = ""
         return {
             "status": "loaded",
+            "model_loaded": True,
             "model_path": request.model_path,
             "max_new_tokens": request.max_new_tokens,
         }
     except Exception as exc:
+        logger.exception("Local LLM model loading failed")
         _generator = None
-        _model_error = str(exc)
+        _model_error = "Model loading failed. Check server logs for details."
         raise HTTPException(
             status_code=400,
-            detail=f"Could not load local model: {exc}",
+            detail=_model_error,
         ) from exc
 
 
@@ -74,7 +84,9 @@ def generate_text(request: GenerateRequest):
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("LLM text generation failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Text generation failed: {exc}",
+            detail="Text generation failed. Check server logs for details.",
         ) from exc
+

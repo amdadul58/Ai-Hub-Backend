@@ -1,0 +1,5 @@
+﻿Write-Host "AI Hub local model setup"
+Write-Host "No models will be downloaded automatically."
+Write-Host "Existing model paths and cached models are preserved."
+Write-Host "LLM status remains model_not_loaded until a compatible local model is configured."
+Write-Host "Vision, Speech, Translation and Multimodal models may use their existing configured paths."

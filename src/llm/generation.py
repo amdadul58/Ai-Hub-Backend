@@ -1,5 +1,6 @@
-from src.llm.guardrails import validate_input
+﻿from src.llm.guardrails import validate_input
 from src.llm.prompt_manager import PromptManager
+
 
 class TextGenerator:
     def __init__(self, inference=None, prompt_manager=None):
@@ -11,7 +12,13 @@ class TextGenerator:
             raise RuntimeError(
                 "No inference model configured. Load a local model first."
             )
+
         user_text = validate_input(prompt)
-        system = system_prompt or self.prompt_manager.get()
+
+        if system_prompt is None:
+            system = self.prompt_manager.get()
+        else:
+            system = validate_input(system_prompt, max_chars=4000)
+
         combined = f"{system}\n\nUser: {user_text}\nAssistant:"
         return self.inference.generate(combined)
