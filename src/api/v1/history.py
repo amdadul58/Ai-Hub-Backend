@@ -8,6 +8,23 @@ from src.services.history_service import HistoryService
 router = APIRouter(prefix="/history", tags=["Conversation History"])
 service = HistoryService()
 
+@router.get("/conversations")
+def list_conversations(
+    user_id: str = Depends(current_user_id),
+):
+    with database_connection() as db:
+        rows = db.execute(
+            """
+            SELECT id, title, created_at, updated_at
+            FROM conversations
+            WHERE user_id = %s
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (int(user_id),),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
 
 class ConversationCreate(BaseModel):
     title: str = Field(default="New conversation", min_length=1, max_length=200)
@@ -61,3 +78,4 @@ def add_message(
         return service.add_message(conversation_id, payload.role, payload.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+

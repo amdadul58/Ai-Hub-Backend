@@ -1,8 +1,13 @@
-﻿class LocalInference:
+﻿
+class LocalInference:
     def __init__(self, model, tokenizer, max_new_tokens=128):
         self.model = model
         self.tokenizer = tokenizer
-        self.max_new_tokens = max(1, min(int(max_new_tokens), 512))
+        self.max_new_tokens = max(1, min(int(max_new_tokens), 128))
+
+        # GPT-2 family models commonly have no dedicated padding token.
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def generate(self, prompt: str, max_new_tokens=None) -> str:
         import torch
@@ -11,7 +16,7 @@
             raise ValueError("Prompt cannot be empty.")
 
         token_limit = self.max_new_tokens if max_new_tokens is None else max(
-            1, min(int(max_new_tokens), 512)
+            1, min(int(max_new_tokens), 128)
         )
 
         inputs = self.tokenizer(
@@ -20,6 +25,7 @@
             truncation=True,
             max_length=512,
         )
+
         device = getattr(self.model, "device", None)
         if device is not None:
             inputs = inputs.to(device)
@@ -29,7 +35,11 @@
                 **inputs,
                 max_new_tokens=token_limit,
                 do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id,
+                num_beams=1,
+                no_repeat_ngram_size=3,
+                repetition_penalty=1.2,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
             )
 
         if getattr(self.model.config, "is_encoder_decoder", False):
@@ -38,9 +48,11 @@
             generated_ids = output_ids[:, inputs["input_ids"].shape[1]:]
 
         result = self.tokenizer.decode(
-            generated_ids[0], skip_special_tokens=True
+            generated_ids[0],
+            skip_special_tokens=True,
         ).strip()
 
         if not result:
             raise ValueError("The model returned an empty response.")
+
         return result

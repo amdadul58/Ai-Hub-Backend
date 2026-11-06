@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from src.api.v1.users import current_user_id
-from src.services.file_service import save_upload, safe_upload_path
+from src.services.file_service import get_upload_directory, save_upload, safe_upload_path
 
 router = APIRouter(prefix="/files", tags=["Files"])
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -35,6 +35,51 @@ async def upload_file(
     finally:
         await file.close()
 
+
+@router.get("/")
+def list_files(user_id: str = Depends(current_user_id)):
+    """List files belonging only to the authenticated user."""
+    directory = get_upload_directory()
+    expected_prefix = f"user_{user_id}_"
+    files = []
+
+    for path in directory.iterdir():
+        if not path.is_file() or not path.name.startswith(expected_prefix):
+            continue
+        if path.name.endswith(".tmp"):
+            continue
+
+        stat = path.stat()
+        files.append({
+            "filename": path.name,
+            "size_bytes": stat.st_size,
+            "modified_at": stat.st_mtime,
+        })
+
+    files.sort(key=lambda item: item["modified_at"], reverse=True)
+    return {"files": files, "count": len(files)}
+
+@router.delete("/{filename}")
+def delete_file(filename: str, user_id: str = Depends(current_user_id)):
+    """Delete a file owned by the authenticated user."""
+    expected_prefix = f"user_{user_id}_"
+    if not filename.startswith(expected_prefix):
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    try:
+        path = safe_upload_path(filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid filename.") from exc
+
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Could not delete file.") from exc
+
+    return {"message": "File deleted successfully.", "filename": filename}
 
 @router.get("/{filename}")
 def download_file(

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+﻿from pydantic import BaseModel, Field
 
 
 class RegisterRequest(BaseModel):
@@ -16,3 +16,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int = 3600
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=20, max_length=10000)
+

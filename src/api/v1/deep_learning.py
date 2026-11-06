@@ -3,11 +3,35 @@ from importlib.util import find_spec
 from pathlib import Path
 import json
 import secrets
+import logging
+import time
+
+from src.database.session import database_connection
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/deep-learning", tags=["Deep Learning"])
+
+
+logger = logging.getLogger(__name__)
+
+
+def _record_inference(status: str, latency_ms: float):
+    try:
+        with database_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO inference_logs
+                    (model_name, status, latency_ms, details_json)
+                VALUES (%s, %s, %s, %s)
+                """,
+                ("Deep Learning", status, latency_ms, "{}"),
+            )
+    except Exception:
+        logger.exception("Could not record Deep Learning usage")
+
+
 
 ARTIFACT_DIR = Path(__file__).resolve().parents[3] / "artifacts" / "deep_learning"
 
@@ -159,6 +183,7 @@ def train_deep_learning(request: TrainRequest):
     loss_function = torch.nn.CrossEntropyLoss()
 
     history = []
+    started_at = time.perf_counter()
     try:
         for epoch in range(request.epochs):
             result = train_one_epoch(
@@ -193,10 +218,12 @@ def train_deep_learning(request: TrainRequest):
             encoding="utf-8",
         )
 
+        _record_inference("success", (time.perf_counter() - started_at) * 1000)
         return metadata
     except HTTPException:
         raise
     except Exception as exc:
+        _record_inference("error", (time.perf_counter() - started_at) * 1000)
         raise HTTPException(
             status_code=500,
             detail="Model training failed.",
@@ -243,13 +270,14 @@ def predict_saved_model(model_id: str, request: PredictRequest):
             detail="Inputs must contain finite numeric values.",
         )
 
+    started_at = time.perf_counter()
     try:
         inputs = torch.tensor(request.inputs, dtype=torch.float32)
         logits = predict_batch(model, inputs, device="cpu")
         probabilities = torch.softmax(logits, dim=1)
         predicted_indices = probabilities.argmax(dim=1).tolist()
 
-        return {
+        result = {
             "model_id": model_id,
             "predictions": [
                 {
@@ -262,9 +290,12 @@ def predict_saved_model(model_id: str, request: PredictRequest):
                 for row, index in enumerate(predicted_indices)
             ],
         }
+        _record_inference("success", (time.perf_counter() - started_at) * 1000)
+        return result
     except HTTPException:
         raise
     except Exception as exc:
+        _record_inference("error", (time.perf_counter() - started_at) * 1000)
         raise HTTPException(
             status_code=500,
             detail="Prediction failed.",

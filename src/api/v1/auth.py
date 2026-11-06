@@ -1,5 +1,8 @@
-from fastapi import APIRouter, HTTPException
-from src.schemas.auth import RegisterRequest, LoginRequest
+﻿from fastapi import APIRouter, HTTPException
+from src.schemas.auth import RegisterRequest, LoginRequest, GoogleLoginRequest
+from src.services.google_auth_service import GoogleAuthService
+
+google_auth_service = GoogleAuthService()
 from src.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -24,3 +27,14 @@ def login(payload: LoginRequest):
         return service.login(payload.username, payload.password)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Invalid username or password.") from exc
+
+
+@router.post("/google")
+def google_login(payload: GoogleLoginRequest):
+    try:
+        return google_auth_service.login(payload.id_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+

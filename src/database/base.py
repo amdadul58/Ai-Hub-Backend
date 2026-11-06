@@ -8,8 +8,13 @@ SCHEMA_STATEMENTS = [
         email TEXT UNIQUE,
         password_hash TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP::text
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP::text,
+        role TEXT NOT NULL DEFAULT 'user'
     )
+    """,
+    """
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'
     """,
     """
     CREATE TABLE IF NOT EXISTS conversations (
@@ -103,3 +108,4 @@ def initialize_database():
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
     return {"status": "initialized", "tables": 9}
+

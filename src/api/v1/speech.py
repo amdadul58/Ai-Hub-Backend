@@ -1,8 +1,11 @@
 ﻿from pathlib import Path
 from uuid import uuid4
 import sys
+import logging
+import time
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from src.database.session import database_connection
 
 router = APIRouter(prefix="/speech", tags=["Speech AI"])
 
@@ -21,6 +24,24 @@ MODEL_CANDIDATES = [
 ALLOWED_AUDIO_FORMATS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
 MAX_FILE_SIZE = 25 * 1024 * 1024
 _whisper_model = None
+
+logger = logging.getLogger(__name__)
+
+
+def _record_inference(model_name: str, status: str, latency_ms: float):
+    """Save Speech AI usage without interrupting transcription."""
+    try:
+        with database_connection() as db:
+            db.execute(
+                """
+                INSERT INTO inference_logs
+                    (model_name, status, latency_ms, details_json)
+                VALUES (%s, %s, %s, '{}')
+                """,
+                (model_name, status, latency_ms),
+            )
+    except Exception:
+        logger.exception("Failed to save Speech AI analytics")
 
 
 def find_model_path():
@@ -127,6 +148,9 @@ async def transcribe_audio(
         description="Language code, e.g. bn for Bengali or en for English.",
     ),
 ):
+    started_at = time.perf_counter()
+    inference_status = "error"
+
     try:
         filename, audio_path, _ = await read_audio_upload(file)
         model = get_whisper_model()
@@ -147,6 +171,7 @@ async def transcribe_audio(
             ) from exc
 
         text = result.get("text", "").strip()
+        inference_status = "success"
         return {
             "module": "Speech AI",
             "filename": filename,
@@ -156,5 +181,7 @@ async def transcribe_audio(
             "model": "Whisper Tiny",
         }
     finally:
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference("Whisper Tiny", inference_status, latency_ms)
         await file.close()
 

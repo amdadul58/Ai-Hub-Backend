@@ -1,15 +1,33 @@
 ﻿
 import logging
 import threading
+import time
 from pathlib import Path
 
 import torch
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from src.database.session import database_connection
 
 router = APIRouter(prefix="/translation", tags=["Translation AI"])
 logger = logging.getLogger(__name__)
+
+
+def _record_inference(model_name: str, status: str, latency_ms: float):
+    """Save translation usage without interrupting the AI request."""
+    try:
+        with database_connection() as db:
+            db.execute(
+                """
+                INSERT INTO inference_logs
+                    (model_name, status, latency_ms, details_json)
+                VALUES (%s, %s, %s, '{}')
+                """,
+                (model_name, status, latency_ms),
+            )
+    except Exception:
+        logger.exception("Failed to save translation analytics")
 
 CACHE_DIR = Path.home() / ".cache" / "huggingface" / "hub"
 
@@ -145,6 +163,8 @@ def translate_text(request: TranslationRequest):
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
 
     tokenizer, model = get_translator(request.direction)
+    model_name = MODELS[request.direction]["model_id"]
+    started_at = time.perf_counter()
 
     try:
         inputs = tokenizer(
@@ -166,6 +186,9 @@ def translate_text(request: TranslationRequest):
             skip_special_tokens=True,
         )
 
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference(model_name, "success", latency_ms)
+
         return {
             "module": "Translation AI",
             "direction": request.direction,
@@ -175,6 +198,9 @@ def translate_text(request: TranslationRequest):
         }
 
     except Exception as exc:
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference(model_name, "error", latency_ms)
+
         logger.exception("Translation inference failed: %s", request.direction)
         raise HTTPException(
             status_code=422,

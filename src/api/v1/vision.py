@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
@@ -29,6 +29,11 @@ def get_model():
         )
 
     try:
+        import sys
+        vision_packages = Path(r"D:\Ai Eng 26.2\Vision AI Lab\venv\Lib\site-packages")
+        if vision_packages.is_dir() and str(vision_packages) not in sys.path:
+            sys.path.insert(0, str(vision_packages))
+
         from ultralytics import YOLO
         _model = YOLO(str(MODEL_PATH))
         return _model

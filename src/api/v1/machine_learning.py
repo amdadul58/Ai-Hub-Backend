@@ -1,7 +1,10 @@
 ﻿from pathlib import Path
+import logging
+import time
 
 import numpy as np
 from fastapi import APIRouter, HTTPException
+from src.database.session import database_connection
 
 from src.schemas.machine_learning import (
     TrainRequest,
@@ -19,6 +22,25 @@ from src.machine_learning.training.trainer import train_model, load_model
 from src.machine_learning.inference.predictor import predict
 
 router = APIRouter(prefix="/machine-learning", tags=["Machine Learning"])
+
+
+logger = logging.getLogger(__name__)
+
+
+def _record_inference(status: str, latency_ms: float):
+    """Save Machine Learning usage in dashboard analytics."""
+    try:
+        with database_connection() as db:
+            db.execute(
+                """
+                INSERT INTO inference_logs
+                    (model_name, status, latency_ms, details_json)
+                VALUES (%s, %s, %s, '{}')
+                """,
+                ("Machine Learning", status, latency_ms),
+            )
+    except Exception:
+        logger.exception("Failed to save Machine Learning analytics")
 
 MODEL_DIR = Path("artifacts") / "models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -86,6 +108,8 @@ def train_endpoint(request: TrainRequest):
 
     model_path = MODEL_DIR / request.model_name
 
+    started_at = time.perf_counter()
+
     try:
         result = train_model(model, X, y, model_path)
         y_pred = predict(result["model"], X)
@@ -93,7 +117,13 @@ def train_endpoint(request: TrainRequest):
             metrics = classification_metrics(y, y_pred)
         else:
             metrics = regression_metrics(y, y_pred)
+
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference("success", latency_ms)
+
     except (ValueError, TypeError) as exc:
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference("error", latency_ms)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return TrainResponse(
@@ -109,15 +139,25 @@ def train_endpoint(request: TrainRequest):
 def predict_endpoint(request: PredictRequest):
     model_path = MODEL_DIR / request.model_name
 
+    started_at = time.perf_counter()
+
     try:
         model = load_model(model_path)
         X = np.asarray(request.features, dtype=float)
         if X.ndim != 2 or X.shape[1] == 0 or not np.isfinite(X).all():
             raise HTTPException(status_code=400, detail="Features must be a finite, non-empty 2D array.")
         predictions = predict(model, X)
+
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference("success", latency_ms)
+
     except FileNotFoundError as exc:
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference("error", latency_ms)
         raise HTTPException(status_code=404, detail="Saved model not found.") from exc
     except (ValueError, TypeError) as exc:
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        _record_inference("error", latency_ms)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return PredictResponse(

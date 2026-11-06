@@ -22,7 +22,25 @@ class SearchRequest(BaseModel):
 
 class AskRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
-    top_k: int = Field(default=3, ge=1, le=10)
+    top_k: int = Field(default=5, ge=1, le=10)
+
+
+def _decode_escaped_unicode(value):
+    """Convert literal escaped Unicode sequences into readable characters."""
+    if not isinstance(value, str):
+        return value
+
+    for _ in range(3):
+        decoded = re.sub(
+            r"\\+u([0-9a-fA-F]{4})",
+            lambda match: chr(int(match.group(1), 16)),
+            value,
+        )
+        if decoded == value:
+            break
+        value = decoded
+
+    return value
 
 
 def _document_text(item):
@@ -275,7 +293,7 @@ def ask_knowledge_base(request: AskRequest):
     sources = []
 
     for index, item in enumerate(results):
-        document_text = _document_text(item)
+        document_text = _decode_escaped_unicode(_document_text(item))
 
         if not document_text:
             continue
@@ -295,7 +313,7 @@ def ask_knowledge_base(request: AskRequest):
 
         sources.append({
             "source": source,
-            "text": document_text[:1000],
+            "text": _decode_escaped_unicode(document_text[:1000]),
         })
 
     if not context_parts:
@@ -343,7 +361,7 @@ def ask_knowledge_base(request: AskRequest):
 
     return {
         "query": request.query,
-        "answer": answer,
+        "answer": _decode_escaped_unicode(answer),
         "sources": sources,
         "retrieved_count": len(context_parts),
     }

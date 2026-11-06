@@ -1,5 +1,6 @@
 ﻿import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -7,6 +8,19 @@ from src.rag.embeddings import embed_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STORE = PROJECT_ROOT / "data" / "rag_store.json"
+
+_STOP_WORDS = {
+    "কি", "কী", "কেন", "কবে", "কোথায়", "কোথায়", "কে", "কোন",
+    "কত", "হয়", "হয়", "হলো", "এর", "ও", "এবং", "একটি",
+}
+
+
+def _tokens(text):
+    return {
+        token
+        for token in re.findall(r"\w+", str(text or "").casefold())
+        if token not in _STOP_WORDS and len(token) > 1
+    }
 
 
 def _cosine(a, b):
@@ -79,7 +93,6 @@ class LocalVectorStore:
             source = str(metadata.get("source", ""))
             chunk = metadata.get("chunk")
 
-            # Replace the same source/chunk instead of accumulating duplicates.
             if source and chunk is not None:
                 records = [
                     record for record in records
@@ -107,6 +120,7 @@ class LocalVectorStore:
             return []
 
         query_vector = embed_text(query)
+        query_tokens = _tokens(query)
         results = []
 
         for record in self._read():
@@ -114,14 +128,34 @@ class LocalVectorStore:
             if not isinstance(embedding, list):
                 continue
 
+            text = record.get("text", "")
             score = _cosine(query_vector, embedding)
+
+            if score < 0.08:
+                continue
+
+            document_tokens = _tokens(text)
+            overlap = len(query_tokens & document_tokens)
+            coverage = overlap / len(query_tokens) if query_tokens else 0.0
+
+            # Combine existing embedding similarity with exact word overlap.
+            rank_score = score + (0.30 * coverage)
+
             results.append({
-                "text": record.get("text", ""),
+                "text": text,
                 "metadata": record.get("metadata", {}),
                 "score": round(score, 4),
+                "_rank_score": rank_score,
             })
 
-        results.sort(key=lambda item: item["score"], reverse=True)
+        results.sort(
+            key=lambda item: (item["_rank_score"], item["score"]),
+            reverse=True,
+        )
+
+        for item in results:
+            item.pop("_rank_score", None)
+
         return results[:top_k]
 
     def clear(self):
